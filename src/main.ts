@@ -673,9 +673,9 @@ function snapToNearestWall(root: AbstractMesh, useDefaultHeight: boolean = false
             bestSnapX = projX + normalX * (thickness + objDepthHalf);
             bestSnapZ = projZ + normalZ * (thickness + objDepthHalf);
             // Wall normal angle: the direction the object should face (outward from wall)
-            // atan2(normalX, normalZ) gives angle of normal; add π/2 to compensate
-            // for GLB model whose "front" faces +X by default instead of +Z
-            bestRotY = Math.atan2(normalX, normalZ) + Math.PI / 2;
+            // atan2(normalX, normalZ) gives angle of normal; add π to compensate
+            // for GLB model whose "front" faces toward its own -X or similar.
+            bestRotY = Math.atan2(normalX, normalZ) + Math.PI;
         }
     }
 
