@@ -18,7 +18,8 @@ import {
     Mesh,
     Material,
     VertexData,
-    DynamicTexture
+    DynamicTexture,
+    Plane
 } from '@babylonjs/core';
 import '@babylonjs/loaders/glTF';
 
@@ -27,7 +28,7 @@ const availableModels = [
     { name: 'Móvel Superior 2 Portas', file: 'superior_2_portas.glb', type: 'wall' as const }
 ];
 
-const WALL_MOUNT_HEIGHT = 1.5; // Height from floor for wall-mounted items
+const WALL_MOUNT_HEIGHT = 0.5; // Height from floor for wall-mounted items
 
 // ─── Undo/Redo/Save System ──────────────────────────────────────────────────
 interface ObjectState {
@@ -260,29 +261,31 @@ const createScene = function () {
     const scene = new Scene(engine);
     scene.clearColor = new Color3(0.9, 0.9, 0.9).toColor4();
 
-    const camera = new ArcRotateCamera('camera', -Math.PI / 2, Math.PI / 2.5, 10, Vector3.Zero(), scene);
+    const camera = new ArcRotateCamera('camera', -Math.PI / 2, Math.PI / 2.5, 15, Vector3.Zero(), scene);
     camera.attachControl(canvas, true);
-    camera.wheelPrecision = 50;
-    camera.minZ = 0.1;
+    camera.wheelPrecision = 10;
+    camera.minZ = 0.01;
 
     camera.inputs.removeByType('ArcRotateCameraPointersInput');
 
     const customPointerInput = new ArcRotateCameraPointersInput();
     customPointerInput.buttons = [1, 2];
-    customPointerInput.angularSensibilityX = 1000.0;
-    customPointerInput.angularSensibilityY = 1000.0;
-    customPointerInput.panningSensibility = 1000.0;
+    customPointerInput.angularSensibilityX = 500.0;
+    customPointerInput.angularSensibilityY = 500.0;
+    customPointerInput.panningSensibility = 200.0;
     camera.inputs.add(customPointerInput);
 
     camera._panningMouseButton = 1;
 
     // Camera Limits
-    camera.lowerRadiusLimit = 0.1;
-    camera.upperRadiusLimit = 100;
+    camera.lowerRadiusLimit = 0.5;
+    camera.upperRadiusLimit = 30;
     camera.upperBetaLimit = Math.PI / 2.0; // Allow looking horizontal
+    camera.inertia = 0; // Remove camera rotation and zoom delay
+    camera.panningInertia = 0; // Remove panning delay
 
     scene.onBeforeRenderObservable.add(() => {
-        // Limited target within room boundaries
+        // Keep target within room boundaries
         camera.target.x = Math.max(-roomWidth, Math.min(roomWidth, camera.target.x));
         camera.target.z = Math.max(-roomDepth, Math.min(roomDepth, camera.target.z));
     });
@@ -535,6 +538,45 @@ function getMTV(min: Vector3, max: Vector3, wall: AbstractMesh): Vector3 | null 
 }
 
 // Returns the correction delta that was applied (zero vector if no correction)
+function resolveCollisions(root: AbstractMesh, includeWalls: boolean): Vector3 {
+    const totalCorrection = new Vector3(0, 0, 0);
+    let { min, max } = computeMeshWorldBounds(root);
+
+    // Build the list of colliders to check
+    const colliders: AbstractMesh[] = [];
+    if (includeWalls) {
+        colliders.push(...roomColliders);
+    }
+    for (const [p, c] of objectColliders.entries()) {
+        if (p === root) continue;
+        colliders.push(c);
+    }
+
+    // Iterate multiple times to resolve compound/cascading collisions
+    for (let iter = 0; iter < 3; iter++) {
+        let moved = false;
+        for (const other of colliders) {
+            if (other === root || getTopLevelMesh(other) === root) continue;
+
+            const mtv = getMTV(min, max, other);
+            if (mtv) {
+                root.position.addInPlace(mtv);
+                totalCorrection.addInPlace(mtv);
+                moved = true;
+
+                // Update bounds for the next collider check
+                root.computeWorldMatrix(true);
+                const newBounds = computeMeshWorldBounds(root);
+                min = newBounds.min;
+                max = newBounds.max;
+            }
+        }
+        if (!moved) break;
+    }
+
+    return totalCorrection;
+}
+
 function applyRoomBoundaries(mesh: AbstractMesh): Vector3 {
     const root = getTopLevelMesh(mesh);
 
@@ -546,12 +588,13 @@ function applyRoomBoundaries(mesh: AbstractMesh): Vector3 {
     const totalCorrection = new Vector3(0, 0, 0);
 
     let dx = 0, dy = 0, dz = 0;
+    const margin = wallThickness / 2;
 
-    if (min.x < -roomHalfWidth) dx = -roomHalfWidth - min.x;
-    else if (max.x > roomHalfWidth) dx = roomHalfWidth - max.x;
+    if (min.x < -roomHalfWidth + margin) dx = -roomHalfWidth + margin - min.x;
+    else if (max.x > roomHalfWidth - margin) dx = roomHalfWidth - margin - max.x;
 
-    if (min.z < -roomHalfDepth) dz = -roomHalfDepth - min.z;
-    else if (max.z > roomHalfDepth) dz = roomHalfDepth - max.z;
+    if (min.z < -roomHalfDepth + margin) dz = -roomHalfDepth + margin - min.z;
+    else if (max.z > roomHalfDepth - margin) dz = roomHalfDepth - margin - max.z;
 
     if (min.y < FLOOR_Y && !(root.metadata?.mountType === 'wall')) dy = FLOOR_Y - min.y;
 
@@ -561,34 +604,11 @@ function applyRoomBoundaries(mesh: AbstractMesh): Vector3 {
         totalCorrection.addInPlace(correction);
 
         root.computeWorldMatrix(true);
-        root.getChildMeshes(false).forEach(c => c.computeWorldMatrix(true));
-        const newBounds = computeMeshWorldBounds(root);
-        min = newBounds.min;
-        max = newBounds.max;
     }
 
-    // Check collisions against all interior and perimeter walls
-    for (let iter = 0; iter < 3; iter++) {
-        let moved = false;
-        for (const wall of roomColliders) {
-            // Check if mesh being checked is the wall itself
-            if (wall === root || getTopLevelMesh(wall) === root) continue;
-
-            const mtv = getMTV(min, max, wall);
-            if (mtv) {
-                root.position.addInPlace(mtv);
-                totalCorrection.addInPlace(mtv);
-                moved = true;
-
-                // Update bounds for next wall
-                root.computeWorldMatrix(true);
-                const newBounds = computeMeshWorldBounds(root);
-                min = newBounds.min;
-                max = newBounds.max;
-            }
-        }
-        if (!moved) break;
-    }
+    // Resolve collisions against walls and other objects
+    const collisionCorrection = resolveCollisions(root, true);
+    totalCorrection.addInPlace(collisionCorrection);
 
     if (totalCorrection.lengthSquared() > 0) {
         updateObjectCollider(root);
@@ -602,7 +622,7 @@ function isWallMounted(mesh: AbstractMesh): boolean {
     return root.metadata?.mountType === 'wall';
 }
 
-function snapToNearestWall(root: AbstractMesh, useDefaultHeight: boolean = false) {
+function snapToNearestWall(root: AbstractMesh, useDefaultHeight: boolean = false, preserveRotation: boolean = false) {
     // Temporarily reset rotation to measure unrotated bounds
     const savedRotY = root.rotation.y;
     root.rotation.y = 0;
@@ -621,16 +641,16 @@ function snapToNearestWall(root: AbstractMesh, useDefaultHeight: boolean = false
     const currentY = useDefaultHeight ? WALL_MOUNT_HEIGHT : root.position.y;
 
     // Build list of all wall segments: perimeter + custom
-    type WallSeg = { start: { x: number; z: number }; end: { x: number; z: number }; thickness: number };
+    type WallSeg = { start: { x: number; z: number }; end: { x: number; z: number }; thickness: number; isPerimeter?: boolean };
     const allWalls: WallSeg[] = [];
 
     // 4 perimeter walls (room boundary)
     const hw = roomHalfWidth;
     const hd = roomHalfDepth;
-    allWalls.push({ start: { x: -hw, z: -hd }, end: { x:  hw, z: -hd }, thickness: wallThickness }); // South
-    allWalls.push({ start: { x:  hw, z: -hd }, end: { x:  hw, z:  hd }, thickness: wallThickness }); // East
-    allWalls.push({ start: { x:  hw, z:  hd }, end: { x: -hw, z:  hd }, thickness: wallThickness }); // North
-    allWalls.push({ start: { x: -hw, z:  hd }, end: { x: -hw, z: -hd }, thickness: wallThickness }); // West
+    allWalls.push({ start: { x: -hw, z: -hd }, end: { x: hw, z: -hd }, thickness: wallThickness, isPerimeter: true }); // South
+    allWalls.push({ start: { x: hw, z: -hd }, end: { x: hw, z: hd }, thickness: wallThickness, isPerimeter: true }); // East
+    allWalls.push({ start: { x: hw, z: hd }, end: { x: -hw, z: hd }, thickness: wallThickness, isPerimeter: true }); // North
+    allWalls.push({ start: { x: -hw, z: hd }, end: { x: -hw, z: -hd }, thickness: wallThickness, isPerimeter: true }); // West
 
     // Custom walls
     for (const w of customWalls) {
@@ -641,6 +661,8 @@ function snapToNearestWall(root: AbstractMesh, useDefaultHeight: boolean = false
     let bestSnapX = root.position.x;
     let bestSnapZ = root.position.z;
     let bestRotY = root.rotation.y;
+    let bestNormalX = 0;
+    let bestNormalZ = 0;
 
     for (const w of allWalls) {
         const wx = w.end.x - w.start.x;
@@ -650,14 +672,10 @@ function snapToNearestWall(root: AbstractMesh, useDefaultHeight: boolean = false
 
         const dirX = wx / wallLen;
         const dirZ = wz / wallLen;
+
+        // Base inward normal (perpendicular to wall direction)
         const nx = -dirZ;
         const nz = dirX;
-
-        // Determine which side of the wall the object center is on
-        const toObj = { x: center.x - w.start.x, z: center.z - w.start.z };
-        const side = toObj.x * nx + toObj.z * nz;
-        const normalX = side >= 0 ? nx : -nx;
-        const normalZ = side >= 0 ? nz : -nz;
 
         // Project center onto wall line
         const t = ((center.x - w.start.x) * dirX + (center.z - w.start.z) * dirZ) / wallLen;
@@ -667,22 +685,52 @@ function snapToNearestWall(root: AbstractMesh, useDefaultHeight: boolean = false
 
         const dist = Math.sqrt((center.x - projX) ** 2 + (center.z - projZ) ** 2);
 
-        if (dist < bestDist) {
+        const isWallMountedObj = root.metadata?.mountType === 'wall';
+        if ((isWallMountedObj || dist < 1.2) && dist < bestDist) {
             bestDist = dist;
+
+            // Determine which side of the wall the object center is on
+            const toObj = { x: center.x - w.start.x, z: center.z - w.start.z };
+            let side = toObj.x * nx + toObj.z * nz;
+
+            // For perimeter walls, always force the inward-facing side
+            if (w.isPerimeter) {
+                side = 1;
+            }
+
+            const finalNormalX = side >= 0 ? nx : -nx;
+            const finalNormalZ = side >= 0 ? nz : -nz;
+
             const thickness = (w.thickness || wallThickness) / 2;
-            bestSnapX = projX + normalX * (thickness + objDepthHalf);
-            bestSnapZ = projZ + normalZ * (thickness + objDepthHalf);
+            bestSnapX = projX + finalNormalX * (thickness + objDepthHalf);
+            bestSnapZ = projZ + finalNormalZ * (thickness + objDepthHalf);
+            bestNormalX = finalNormalX;
+            bestNormalZ = finalNormalZ;
+            
             // Wall normal angle: the direction the object should face (outward from wall)
-            // atan2(normalX, normalZ) gives angle of normal; add π to compensate
-            // for GLB model whose "front" faces toward its own -X or similar.
-            bestRotY = Math.atan2(normalX, normalZ) + Math.PI;
+            bestRotY = Math.atan2(finalNormalX, finalNormalZ) + Math.PI;
         }
     }
 
     root.position.x = bestSnapX;
     root.position.z = bestSnapZ;
     root.position.y = currentY;
-    root.rotation.y = bestRotY;
+    
+    if (!preserveRotation) {
+        // Crucial: nullify rotationQuaternion to allow rotation.y to work
+        root.rotationQuaternion = null;
+        root.rotation.y = bestRotY;
+    }
+
+    // Resolve collisions against other objects
+    resolveCollisions(root, false);
+
+    // Re-snap to ensure collision resolution didn't push us away from the wall surface
+    if (Math.abs(bestNormalX) > 0.5) {
+        root.position.x = bestSnapX;
+    } else if (Math.abs(bestNormalZ) > 0.5) {
+        root.position.z = bestSnapZ;
+    }
 
     // Recompute bounds after rotation to clamp Y properly
     root.computeWorldMatrix(true);
@@ -695,6 +743,8 @@ function snapToNearestWall(root: AbstractMesh, useDefaultHeight: boolean = false
     if (root.position.y + objHalfH > wallHeight) {
         root.position.y = wallHeight - objHalfH;
     }
+
+    updateObjectCollider(root);
 }
 
 function clearDimensionMarkers() {
@@ -836,7 +886,6 @@ function updateDimensionMarkers(mesh: AbstractMesh) {
 
 // Drag state for manual dragging
 let isDraggingMesh = false;
-let dragPlaneY = 0;
 
 
 // ─── 2D Wall System Functions ───────────────────────────────────────────────
@@ -1820,7 +1869,7 @@ function setupGizmos(scene: Scene) {
     gizmoManager.gizmos.positionGizmo?.onDragObservable.add(() => {
         if (selectedMesh) {
             if (isWallMounted(selectedMesh)) {
-                snapToNearestWall(getTopLevelMesh(selectedMesh));
+                snapToNearestWall(getTopLevelMesh(selectedMesh), false, true);
             } else {
                 applyRoomBoundaries(selectedMesh);
             }
@@ -1972,7 +2021,6 @@ function setupGizmos(scene: Scene) {
                         if (!isInfrastructure(getTopLevelMesh(mesh))) {
                             isDraggingMesh = true;
                             dragLastPos = pickResult.pickedPoint ? pickResult.pickedPoint.clone() : null;
-                            dragPlaneY = getTopLevelMesh(mesh).position.y;
                         }
                     }
                 } else {
@@ -1996,31 +2044,48 @@ function setupGizmos(scene: Scene) {
         }
 
         if (pointerInfo.type === PointerEventTypes.POINTERMOVE && isDraggingMesh && selectedMesh && !isInfrastructure(selectedMesh)) {
-            // Pick on a Y-plane at the mesh's current altitude
+            if (!scene.activeCamera || !dragLastPos) return;
+            const root = getTopLevelMesh(selectedMesh);
             const ray = scene.createPickingRay(scene.pointerX, scene.pointerY, null, scene.activeCamera);
-            const t = (dragPlaneY - ray.origin.y) / (ray.direction.y || 0.0001);
-            const worldPoint = ray.origin.add(ray.direction.scale(t));
-
-            if (dragLastPos) {
-                const root = getTopLevelMesh(selectedMesh);
-
+            
+            // 1. Try to pick against infrastructure (walls/floor)
+            const pick = scene.pickWithRay(ray, (m) => isInfrastructure(m));
+            
+            if (pick && pick.hit && pick.pickedPoint) {
+                const targetPos = pick.pickedPoint;
+                root.position.copyFrom(targetPos);
+                
                 if (isWallMounted(root)) {
-                    // For wall items: move along XZ to slide along wall, and Y to adjust height
-                    const delta = new Vector3(worldPoint.x - dragLastPos.x, 0, worldPoint.z - dragLastPos.z);
-                    root.position.addInPlace(delta);
-                    // Also allow vertical movement via Y-axis pick difference
-                    const yDelta = worldPoint.y - dragLastPos.y;
-                    root.position.y += yDelta;
                     snapToNearestWall(root);
                 } else {
-                    const delta = new Vector3(worldPoint.x - dragLastPos.x, 0, worldPoint.z - dragLastPos.z);
-                    root.position.addInPlace(delta);
                     applyRoomBoundaries(root);
                 }
+                
                 updateObjectCollider(root);
                 updateDimensionMarkers(root);
+                dragLastPos = root.position.clone();
+            } else {
+                // 2. Fallback to camera-facing plane if no infrastructure hit
+                const cameraDir = scene.activeCamera.getDirection(Vector3.Backward());
+                const pickPlane = Plane.FromPositionAndNormal(dragLastPos, cameraDir);
+                const t = ray.intersectsPlane(pickPlane);
+                
+                if (t !== null) {
+                    const worldPoint = ray.origin.add(ray.direction.scale(t));
+                    const delta = worldPoint.subtract(dragLastPos);
+                    root.position.addInPlace(delta);
+                    
+                    if (isWallMounted(root)) {
+                        snapToNearestWall(root);
+                    } else {
+                        applyRoomBoundaries(root);
+                    }
+                    
+                    updateObjectCollider(root);
+                    updateDimensionMarkers(root);
+                    dragLastPos = root.position.clone();
+                }
             }
-            dragLastPos = worldPoint.clone();
         }
     });
 
@@ -2242,6 +2307,7 @@ function loadModel(filename: string, position: Vector3, normal: Vector3 | null, 
             if (normal && (Math.abs(normal.x) > 0.1 || Math.abs(normal.z) > 0.1)) {
                 const target = root.position.add(normal);
                 root.lookAt(target);
+                root.rotation.y += Math.PI / 2; // Offset for cabinets (-X front)
             }
 
             // Wall-mounted items: snap to nearest wall and elevate
