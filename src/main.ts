@@ -596,7 +596,7 @@ function applyRoomBoundaries(mesh: AbstractMesh): Vector3 {
     if (min.z < -roomHalfDepth + margin) dz = -roomHalfDepth + margin - min.z;
     else if (max.z > roomHalfDepth - margin) dz = roomHalfDepth - margin - max.z;
 
-    if (min.y < FLOOR_Y && !(root.metadata?.mountType === 'wall')) dy = FLOOR_Y - min.y;
+    if (min.y < FLOOR_Y + 0.001 && !(root.metadata?.mountType === 'wall')) dy = (FLOOR_Y + 0.001) - min.y;
 
     if (dx !== 0 || dy !== 0 || dz !== 0) {
         const correction = new Vector3(dx, dy, dz);
@@ -1874,6 +1874,15 @@ function setupGizmos(scene: Scene) {
 
     const objectTools = document.getElementById('object-tools') as HTMLElement;
 
+    const clearSelectionVisuals = () => {
+        currentScene.meshes.forEach(m => {
+            if (m instanceof Mesh) {
+                m.renderOutline = false;
+                m.disableEdgesRendering();
+            }
+        });
+    };
+
     const selectMesh = (mesh: AbstractMesh) => {
         let nodeToAttach = mesh;
         while (nodeToAttach.parent && nodeToAttach.parent.name !== '__root__') {
@@ -1910,16 +1919,26 @@ function setupGizmos(scene: Scene) {
         scaleY.disabled = infrastructure;
         scaleZ.disabled = infrastructure;
 
-        // Clear existing outlines
-        currentScene.meshes.forEach(m => { if (m instanceof Mesh) m.renderOutline = false; });
+        // Clear existing outlines and edges
+        clearSelectionVisuals();
+        
+        const selectionColor = Color3.FromHexString("#00ff00");
 
-        if (mesh.name.includes('Wall') || mesh.name === 'floor' || !infrastructure) {
-            const meshesToOutline = nodeToAttach.getChildMeshes(false).concat(nodeToAttach);
-            meshesToOutline.forEach(m => {
+        if ((mesh.name.includes('Wall') || mesh.name === 'floor' || !infrastructure) && mesh.name !== 'floor') {
+            const isWall = mesh.name.includes('Wall');
+            const meshesToHighlight = nodeToAttach.getChildMeshes(false).concat(nodeToAttach);
+            
+            meshesToHighlight.forEach(m => {
                 if (m instanceof Mesh) {
-                    m.renderOutline = true;
-                    m.outlineColor = Color3.FromHexString("#00ff00");
-                    m.outlineWidth = 0.05;
+                    if (isWall) {
+                        m.edgesWidth = 4.0;
+                        m.edgesColor = selectionColor.toColor4(1.0);
+                        m.enableEdgesRendering();
+                    } else {
+                        m.renderOutline = true;
+                        m.outlineColor = selectionColor;
+                        m.outlineWidth = 0.02;
+                    }
                 }
             });
         }
@@ -2019,7 +2038,7 @@ function setupGizmos(scene: Scene) {
                     selectedMesh = null;
                     gizmoManager.attachToMesh(null);
                     clearDimensionMarkers();
-                    currentScene.meshes.forEach(m => { if (m instanceof Mesh) m.renderOutline = false; });
+                    clearSelectionVisuals();
                     objectTools.style.display = 'none';
                     if (!is2DMode) {
                         document.getElementById('wall-tools-toolbar')!.style.display = 'none';
