@@ -2015,12 +2015,36 @@ function setupGizmos(scene: Scene) {
 
     document.getElementById('tool-duplicate')?.addEventListener('click', () => {
         if (!selectedMesh) return;
-        const clone = selectedMesh.clone(selectedMesh.name + '_clone', null);
+        const root = getTopLevelMesh(selectedMesh);
+        const clone = root.clone(root.name + '_clone', null);
         if (clone) {
-            clone.position.addInPlace(new Vector3(0.5, 0, 0.5));
+            // Calculate width to place clone side-by-side
+            const savedRotY = root.rotation.y;
+            
+            root.rotation.y = 0;
+            root.computeWorldMatrix(true);
+            root.getChildMeshes().forEach(m => m.computeWorldMatrix(true));
+            const bounds = computeMeshWorldBounds(root);
+            const width = bounds.max.x - bounds.min.x;
+            
+            root.rotation.y = savedRotY;
+            root.computeWorldMatrix(true);
+            
+            // Move clone along root's local X axis (right side)
+            const worldMatrix = root.getWorldMatrix();
+            const right = Vector3.TransformNormal(new Vector3(1, 0, 0), worldMatrix);
+            clone.position.addInPlace(right.scale(width));
+
             updateObjectCollider(clone as AbstractMesh);
-            applyRoomBoundaries(clone as AbstractMesh);
+            
+            if (isWallMounted(clone as AbstractMesh)) {
+                snapToNearestWall(clone as AbstractMesh, false, true);
+            } else {
+                applyRoomBoundaries(clone as AbstractMesh);
+            }
+            
             selectMesh(clone as AbstractMesh);
+            saveToHistory();
         }
     });
 
