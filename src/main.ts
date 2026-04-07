@@ -218,6 +218,9 @@ let roomColliders: AbstractMesh[] = [];
 const objectColliders = new Map<AbstractMesh, Mesh>();
 const wallCapMap = new Map<AbstractMesh, Mesh[]>();
 
+let draggingFile: string | null = null;
+let dragPreviewMesh: AbstractMesh | null = null;
+
 let roomWidth = 10;
 let roomDepth = 10;
 let roomHalfWidth = 5;
@@ -2171,21 +2174,94 @@ function setupUI() {
         item.addEventListener('dragstart', e => {
             if (e.dataTransfer) {
                 e.dataTransfer.setData('text/plain', model.file);
+                draggingFile = model.file;
+                
+                // Create a transparent image to hide the default browser drag ghost
+                const img = new Image();
+                img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+                e.dataTransfer.setDragImage(img, 0, 0);
+
+                // Start loading the preview model immediately
+                const dummyPos = new Vector3(0, -100, 0); // Hide initially
+                loadModel(model.file, dummyPos, null).then(mesh => {
+                    if (draggingFile === model.file && mesh) {
+                        dragPreviewMesh = mesh;
+                        // Set preview style
+                        mesh.getChildMeshes().forEach(m => {
+                            if (m.material) {
+                                m.material = m.material.clone(m.material.name + '_preview') as Material;
+                                m.material.alpha = 0.5;
+                                m.material.transparencyMode = Material.MATERIAL_ALPHABLEND;
+                            }
+                        });
+                        mesh.isPickable = false; // Don't pick yourself during drag
+                    } else if (mesh) {
+                        // Drag ended before model loaded - cleanup
+                        mesh.dispose();
+                    }
+                });
             }
+        });
+
+        item.addEventListener('dragend', () => {
+            if (dragPreviewMesh) {
+                dragPreviewMesh.dispose();
+                dragPreviewMesh = null;
+            }
+            draggingFile = null;
         });
     });
 
     canvas.addEventListener('dragover', e => {
         e.preventDefault();
+        if (dragPreviewMesh && draggingFile) {
+            const pickResult = currentScene.pick(e.offsetX, e.offsetY, (m) => isInfrastructure(m));
+            if (pickResult.hit && pickResult.pickedPoint) {
+                dragPreviewMesh.position.copyFrom(pickResult.pickedPoint);
+                
+                if (dragPreviewMesh.metadata?.mountType === 'wall') {
+                    snapToNearestWall(dragPreviewMesh, false);
+                } else {
+                    applyRoomBoundaries(dragPreviewMesh);
+                }
+                
+                // Hide or show based on valid position
+                dragPreviewMesh.setEnabled(true);
+            } else {
+                // If not hitting floor/walls, use a reasonable plane or hide
+                dragPreviewMesh.setEnabled(false);
+            }
+        }
     });
 
     canvas.addEventListener('drop', e => {
         e.preventDefault();
         const file = e.dataTransfer?.getData('text/plain');
         if (file) {
-            const pickResult = currentScene.pick(e.offsetX, e.offsetY);
-            if (pickResult.hit && pickResult.pickedPoint) {
-                loadModel(file, pickResult.pickedPoint, pickResult.getNormal(true));
+            if (dragPreviewMesh && draggingFile === file) {
+                // Finalize the preview mesh instead of loading a new one
+                dragPreviewMesh.getChildMeshes().forEach(m => {
+                    if (m.material) {
+                        m.material.alpha = 1.0;
+                    }
+                });
+                dragPreviewMesh.isPickable = true;
+                updateObjectCollider(dragPreviewMesh);
+                
+                if (!isApplyingState) {
+                    (window as any).selectMeshFromOutside?.(dragPreviewMesh);
+                    saveToHistory();
+                }
+                
+                // Hand over the reference so dragend doesn't dispose it
+                dragPreviewMesh = null;
+                draggingFile = null;
+            } else {
+                // Fallback for unexpected cases
+                const pickResult = currentScene.pick(e.offsetX, e.offsetY);
+                if (pickResult.hit && pickResult.pickedPoint) {
+                    loadModel(file, pickResult.pickedPoint, pickResult.getNormal(true));
+                }
             }
         }
     });
@@ -2323,7 +2399,7 @@ function loadModel(filename: string, position: Vector3, normal: Vector3 | null, 
 
             // Wall-mounted items: snap to nearest wall and elevate
             if (root.metadata?.mountType === 'wall') {
-                snapToNearestWall(root, true);
+                snapToNearestWall(root, false);
             }
 
             updateObjectCollider(root);
