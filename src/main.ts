@@ -711,7 +711,7 @@ function snapToNearestWall(root: AbstractMesh, useDefaultHeight: boolean = false
             bestNormalZ = finalNormalZ;
             
             // Wall normal angle: the direction the object should face (outward from wall)
-            bestRotY = Math.atan2(finalNormalX, finalNormalZ) + Math.PI;
+            bestRotY = Math.atan2(finalNormalX, finalNormalZ);
         }
     }
 
@@ -2394,7 +2394,7 @@ function loadModel(filename: string, position: Vector3, normal: Vector3 | null, 
             if (normal && (Math.abs(normal.x) > 0.1 || Math.abs(normal.z) > 0.1)) {
                 const target = root.position.add(normal);
                 root.lookAt(target);
-                root.rotation.y += Math.PI / 2; // Offset for cabinets (-X front)
+                root.rotation.y -= Math.PI / 2; // Offset for cabinets (+X front)
             }
 
             // Wall-mounted items: snap to nearest wall and elevate
