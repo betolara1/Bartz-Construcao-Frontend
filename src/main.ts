@@ -709,7 +709,7 @@ function snapToNearestWall(root: AbstractMesh, useDefaultHeight: boolean = false
             bestSnapZ = projZ + finalNormalZ * (thickness + objDepthHalf);
             bestNormalX = finalNormalX;
             bestNormalZ = finalNormalZ;
-            
+
             // Wall normal angle: the direction the object should face (outward from wall)
             bestRotY = Math.atan2(finalNormalX, finalNormalZ);
         }
@@ -718,7 +718,7 @@ function snapToNearestWall(root: AbstractMesh, useDefaultHeight: boolean = false
     root.position.x = bestSnapX;
     root.position.z = bestSnapZ;
     root.position.y = currentY;
-    
+
     if (!preserveRotation) {
         // Crucial: nullify rotationQuaternion to allow rotation.y to work
         root.rotationQuaternion = null;
@@ -1856,7 +1856,7 @@ function setup2DCanvasEvents() {
 
 function setupGizmos(scene: Scene) {
     gizmoManager = new GizmoManager(scene);
-    gizmoManager.positionGizmoEnabled = true;
+    gizmoManager.positionGizmoEnabled = false;
     gizmoManager.rotationGizmoEnabled = false;
     gizmoManager.scaleGizmoEnabled = false;
     gizmoManager.usePointerToAttachGizmos = false;
@@ -1924,13 +1924,13 @@ function setupGizmos(scene: Scene) {
 
         // Clear existing outlines and edges
         clearSelectionVisuals();
-        
+
         const selectionColor = Color3.FromHexString("#00ff00");
 
         if ((mesh.name.includes('Wall') || mesh.name === 'floor' || !infrastructure) && mesh.name !== 'floor') {
             const isWall = mesh.name.includes('Wall');
             const meshesToHighlight = nodeToAttach.getChildMeshes(false).concat(nodeToAttach);
-            
+
             meshesToHighlight.forEach(m => {
                 if (m instanceof Mesh) {
                     if (isWall) {
@@ -1969,8 +1969,8 @@ function setupGizmos(scene: Scene) {
 
         if (!infrastructure) {
             objectTools.style.display = 'flex';
-            // Default to move tool when selecting
-            gizmoManager.positionGizmoEnabled = true;
+            // Default to selection mode (no movement gizmos)
+            gizmoManager.positionGizmoEnabled = false;
             gizmoManager.rotationGizmoEnabled = false;
             updateToolActiveState('move');
         } else {
@@ -2000,7 +2000,7 @@ function setupGizmos(scene: Scene) {
     });
 
     document.getElementById('tool-move')?.addEventListener('click', () => {
-        gizmoManager.positionGizmoEnabled = true;
+        gizmoManager.positionGizmoEnabled = false;
         gizmoManager.rotationGizmoEnabled = false;
         updateToolActiveState('move');
     });
@@ -2061,20 +2061,20 @@ function setupGizmos(scene: Scene) {
             if (!scene.activeCamera || !dragLastPos) return;
             const root = getTopLevelMesh(selectedMesh);
             const ray = scene.createPickingRay(scene.pointerX, scene.pointerY, null, scene.activeCamera);
-            
+
             // 1. Try to pick against infrastructure (walls/floor)
             const pick = scene.pickWithRay(ray, (m) => isInfrastructure(m));
-            
+
             if (pick && pick.hit && pick.pickedPoint) {
                 const targetPos = pick.pickedPoint;
                 root.position.copyFrom(targetPos);
-                
+
                 if (isWallMounted(root)) {
                     snapToNearestWall(root);
                 } else {
                     applyRoomBoundaries(root);
                 }
-                
+
                 updateObjectCollider(root);
                 updateDimensionMarkers(root);
                 dragLastPos = root.position.clone();
@@ -2083,18 +2083,18 @@ function setupGizmos(scene: Scene) {
                 const cameraDir = scene.activeCamera.getDirection(Vector3.Backward());
                 const pickPlane = Plane.FromPositionAndNormal(dragLastPos, cameraDir);
                 const t = ray.intersectsPlane(pickPlane);
-                
+
                 if (t !== null) {
                     const worldPoint = ray.origin.add(ray.direction.scale(t));
                     const delta = worldPoint.subtract(dragLastPos);
                     root.position.addInPlace(delta);
-                    
+
                     if (isWallMounted(root)) {
                         snapToNearestWall(root);
                     } else {
                         applyRoomBoundaries(root);
                     }
-                    
+
                     updateObjectCollider(root);
                     updateDimensionMarkers(root);
                     dragLastPos = root.position.clone();
@@ -2175,7 +2175,7 @@ function setupUI() {
             if (e.dataTransfer) {
                 e.dataTransfer.setData('text/plain', model.file);
                 draggingFile = model.file;
-                
+
                 // Create a transparent image to hide the default browser drag ghost
                 const img = new Image();
                 img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
@@ -2218,13 +2218,13 @@ function setupUI() {
             const pickResult = currentScene.pick(e.offsetX, e.offsetY, (m) => isInfrastructure(m));
             if (pickResult.hit && pickResult.pickedPoint) {
                 dragPreviewMesh.position.copyFrom(pickResult.pickedPoint);
-                
+
                 if (dragPreviewMesh.metadata?.mountType === 'wall') {
                     snapToNearestWall(dragPreviewMesh, false);
                 } else {
                     applyRoomBoundaries(dragPreviewMesh);
                 }
-                
+
                 // Hide or show based on valid position
                 dragPreviewMesh.setEnabled(true);
             } else {
@@ -2247,12 +2247,12 @@ function setupUI() {
                 });
                 dragPreviewMesh.isPickable = true;
                 updateObjectCollider(dragPreviewMesh);
-                
+
                 if (!isApplyingState) {
                     (window as any).selectMeshFromOutside?.(dragPreviewMesh);
                     saveToHistory();
                 }
-                
+
                 // Hand over the reference so dragend doesn't dispose it
                 dragPreviewMesh = null;
                 draggingFile = null;
@@ -2442,7 +2442,7 @@ document.addEventListener('keydown', (e) => {
             // In 3D mode, only delete if NOT infrastructure (wall or floor)
             const root = getTopLevelMesh(selectedMesh);
             const isCustomWall = customWalls.some(w => w.mesh === root);
-            
+
             if (!isInfrastructure(root) && !isCustomWall) {
                 deleteSelectedObject();
             }
