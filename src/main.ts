@@ -725,15 +725,17 @@ function snapToNearestWall(root: AbstractMesh, useDefaultHeight: boolean = false
         root.rotation.y = bestRotY;
     }
 
-    // Resolve collisions against other objects
-    resolveCollisions(root, false);
+    // Resolve collisions against walls and other objects
+    resolveCollisions(root, true);
 
     // Re-snap to ensure collision resolution didn't push us away from the wall surface
-    if (Math.abs(bestNormalX) > 0.5) {
-        root.position.x = bestSnapX;
-    } else if (Math.abs(bestNormalZ) > 0.5) {
-        root.position.z = bestSnapZ;
-    }
+    // by projecting the current position onto the wall plane
+    const dx = root.position.x - bestSnapX;
+    const dz = root.position.z - bestSnapZ;
+    const pushOutDist = dx * bestNormalX + dz * bestNormalZ;
+
+    root.position.x -= pushOutDist * bestNormalX;
+    root.position.z -= pushOutDist * bestNormalZ;
 
     // Recompute bounds after rotation to clamp Y properly
     root.computeWorldMatrix(true);
