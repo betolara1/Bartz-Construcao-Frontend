@@ -1820,14 +1820,6 @@ function setup2DCanvasEvents() {
     }, { passive: false });
 
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Delete' || e.key === 'Backspace') {
-            // Only delete if not typing in an input
-            if (document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
-                deleteSelectedObject();
-            }
-            return;
-        }
-
         if (!is2DMode) return;
         if (e.key === 'Escape') {
             if (isDrawingWall) {
@@ -2339,6 +2331,31 @@ loadFromLocalStorage(); // Try to load saved project
 
 engine.runRenderLoop(() => {
     currentScene.render();
+});
+
+// Global Keyboard Shortcut for Object Deletion
+document.addEventListener('keydown', (e) => {
+    // Check if user is typing in an input or textarea
+    const isTyping = document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA';
+    if (isTyping) return;
+
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (is2DMode) {
+            // In 2D mode, behave exactly as before
+            deleteSelectedObject();
+        } else if (selectedMesh) {
+            // In 3D mode, only delete if NOT infrastructure (wall or floor)
+            const root = getTopLevelMesh(selectedMesh);
+            const isCustomWall = customWalls.some(w => w.mesh === root);
+            
+            if (!isInfrastructure(root) && !isCustomWall) {
+                deleteSelectedObject();
+            }
+        }
+        return;
+    }
+
+    // Escape handling for 2D mode is done within setup2DCanvasEvents
 });
 
 window.addEventListener('resize', () => {
