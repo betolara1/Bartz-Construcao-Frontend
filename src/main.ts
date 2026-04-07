@@ -1971,6 +1971,12 @@ function setupGizmos(scene: Scene) {
 
         if (!infrastructure) {
             objectTools.style.display = 'flex';
+            
+            const rotateBtn = document.getElementById('tool-rotate');
+            if (rotateBtn) {
+                rotateBtn.style.display = isWallMounted(nodeToAttach) ? 'none' : 'flex';
+            }
+
             // Default to selection mode (no movement gizmos)
             gizmoManager.positionGizmoEnabled = false;
             gizmoManager.rotationGizmoEnabled = false;
