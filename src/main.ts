@@ -1905,7 +1905,12 @@ function setupGizmos(scene: Scene) {
             objectTools.style.display = 'none';
             clearDimensionMarkers();
         } else {
-            gizmoManager.attachToMesh(nodeToAttach);
+            const isWall = isWallMounted(nodeToAttach);
+            if (isWall) {
+                gizmoManager.attachToMesh(null);
+            } else {
+                gizmoManager.attachToMesh(nodeToAttach);
+            }
             updateObjectCollider(nodeToAttach);
             objectTools.style.display = 'flex';
             updateDimensionMarkers(nodeToAttach);
@@ -1977,8 +1982,9 @@ function setupGizmos(scene: Scene) {
                 rotateBtn.style.display = isWallMounted(nodeToAttach) ? 'none' : 'flex';
             }
 
-            // Default to selection mode (no movement gizmos)
-            gizmoManager.positionGizmoEnabled = false;
+            // Default to selection mode (show movement gizmos for floor items, none for wall items)
+            const isWall = isWallMounted(nodeToAttach);
+            gizmoManager.positionGizmoEnabled = !isWall;
             gizmoManager.rotationGizmoEnabled = false;
             updateToolActiveState('move');
         } else {
