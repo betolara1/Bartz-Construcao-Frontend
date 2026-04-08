@@ -2016,36 +2016,67 @@ function setupGizmos(scene: Scene) {
     document.getElementById('tool-duplicate')?.addEventListener('click', () => {
         if (!selectedMesh) return;
         const root = getTopLevelMesh(selectedMesh);
-        const clone = root.clone(root.name + '_clone', null);
-        if (clone) {
-            // Calculate width to place clone side-by-side
-            const savedRotY = root.rotation.y;
-            
-            root.rotation.y = 0;
-            root.computeWorldMatrix(true);
-            root.getChildMeshes().forEach(m => m.computeWorldMatrix(true));
-            const bounds = computeMeshWorldBounds(root);
-            const width = bounds.max.x - bounds.min.x;
-            
-            root.rotation.y = savedRotY;
-            root.computeWorldMatrix(true);
-            
-            // Move clone along root's local X axis (right side)
-            const worldMatrix = root.getWorldMatrix();
-            const right = Vector3.TransformNormal(new Vector3(1, 0, 0), worldMatrix);
-            clone.position.addInPlace(right.scale(width));
+        const filename = root.metadata?.glbFile;
+        if (!filename) return;
 
-            updateObjectCollider(clone as AbstractMesh);
-            
-            if (isWallMounted(clone as AbstractMesh)) {
-                snapToNearestWall(clone as AbstractMesh, false, true);
-            } else {
-                applyRoomBoundaries(clone as AbstractMesh);
+        // Calculate width to place clone side-by-side
+        const savedRotY = root.rotation.y;
+        
+        root.rotation.y = 0;
+        root.computeWorldMatrix(true);
+        root.getChildMeshes().forEach(m => m.computeWorldMatrix(true));
+        const bounds = computeMeshWorldBounds(root);
+        const width = bounds.max.x - bounds.min.x;
+        
+        root.rotation.y = savedRotY;
+        root.computeWorldMatrix(true);
+        
+        // Target position
+        const worldMatrix = root.getWorldMatrix();
+        const right = Vector3.TransformNormal(new Vector3(1, 0, 0), worldMatrix);
+        const targetPos = root.position.add(right.scale(width));
+
+        // Get exact state of origin object
+        let color = '#ffffff';
+        const childMeshes = root.getChildMeshes();
+        const firstMesh = childMeshes.find(cm => cm.material) || root;
+        if (firstMesh.material) {
+            if (firstMesh.material instanceof PBRMaterial && firstMesh.material.albedoColor) {
+                color = firstMesh.material.albedoColor.toHexString();
+            } else if (firstMesh.material instanceof StandardMaterial && firstMesh.material.diffuseColor) {
+                color = firstMesh.material.diffuseColor.toHexString();
             }
-            
-            selectMesh(clone as AbstractMesh);
-            saveToHistory();
         }
+
+        const state: ObjectState = {
+            name: root.name + '_duplicate',
+            file: filename,
+            position: { x: targetPos.x, y: root.position.y, z: targetPos.z },
+            rotation: { x: root.rotation.x || 0, y: root.rotation.y || 0, z: root.rotation.z || 0 },
+            scaling: { x: root.scaling.x, y: root.scaling.y, z: root.scaling.z },
+            color: color
+        };
+
+        // Temporarily flag to avoid duplicate saving in loadModel
+        const wasApplying = isApplyingState;
+        isApplyingState = true; 
+
+        loadModel(filename, targetPos, null, state).then(newRoot => {
+            isApplyingState = wasApplying;
+            if (newRoot) {
+                // Ensure rotation is preserved before boundaries
+                newRoot.rotation.y = state.rotation.y;
+
+                if (isWallMounted(newRoot)) {
+                    snapToNearestWall(newRoot, false, true);
+                } else {
+                    applyRoomBoundaries(newRoot);
+                }
+                
+                selectMesh(newRoot);
+                saveToHistory();
+            }
+        });
     });
 
     let dragLastPos: Vector3 | null = null;
