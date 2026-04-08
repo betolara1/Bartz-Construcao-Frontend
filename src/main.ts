@@ -164,10 +164,10 @@ async function applySceneState(state: SceneState) {
         build3DWallFrom2D(wall);
     }
 
-    // Load objects
-    for (const obj of state.objects) {
-        await loadModel(obj.file, new Vector3(obj.position.x, obj.position.y, obj.position.z), null, obj);
-    }
+    // Load objects in parallel for maximum speed
+    await Promise.all(state.objects.map(obj => 
+        loadModel(obj.file, new Vector3(obj.position.x, obj.position.y, obj.position.z), null, obj)
+    ));
 
     isApplyingState = false;
     if (is2DMode) draw2D();
@@ -1997,7 +1997,7 @@ function setupGizmos(scene: Scene) {
 
         if (!infrastructure) {
             objectTools.style.display = 'flex';
-            
+
             const rotateBtn = document.getElementById('tool-rotate');
             if (rotateBtn) {
                 rotateBtn.style.display = isWallMounted(nodeToAttach) ? 'none' : 'flex';
@@ -2045,16 +2045,16 @@ function setupGizmos(scene: Scene) {
 
         // Calculate width to place clone side-by-side
         const savedRotY = root.rotation.y;
-        
+
         root.rotation.y = 0;
         root.computeWorldMatrix(true);
         root.getChildMeshes().forEach(m => m.computeWorldMatrix(true));
         const bounds = computeMeshWorldBounds(root);
         const width = bounds.max.x - bounds.min.x;
-        
+
         root.rotation.y = savedRotY;
         root.computeWorldMatrix(true);
-        
+
         // Target position
         const worldMatrix = root.getWorldMatrix();
         const right = Vector3.TransformNormal(new Vector3(1, 0, 0), worldMatrix);
@@ -2083,7 +2083,7 @@ function setupGizmos(scene: Scene) {
 
         // Temporarily flag to avoid duplicate saving in loadModel
         const wasApplying = isApplyingState;
-        isApplyingState = true; 
+        isApplyingState = true;
 
         loadModel(filename, targetPos, null, state).then(newRoot => {
             isApplyingState = wasApplying;
@@ -2096,7 +2096,7 @@ function setupGizmos(scene: Scene) {
                 } else {
                     applyRoomBoundaries(newRoot);
                 }
-                
+
                 selectMesh(newRoot);
                 saveToHistory();
             }
@@ -2257,6 +2257,11 @@ function setupUI() {
             </div>
         `;
         catalogList.appendChild(item);
+
+        item.addEventListener('mouseenter', () => {
+             // Smart pre-loading: start downloading when user hovers over the catalog item
+             ensureModelCached(model.file);
+        });
 
         item.addEventListener('dragstart', e => {
             if (e.dataTransfer) {
@@ -2423,16 +2428,46 @@ function updateScale(axis: 'x' | 'y' | 'z', percent: number) {
     }
 }
 
-function loadModel(filename: string, position: Vector3, normal: Vector3 | null, state?: ObjectState) {
-    return SceneLoader.ImportMeshAsync('', '/glb/', filename, currentScene)
-        .then(result => {
-            const root = result.meshes[0] as AbstractMesh;
-            root.metadata = { glbFile: filename };
+const modelCache = new Map<string, AbstractMesh>();
+const modelLoadingPromises = new Map<string, Promise<AbstractMesh>>();
+
+/**
+ * Gets the root URL and filename from a possibly full URL or local path.
+ */
+function getUrlParts(url: string) {
+    if (url.startsWith('http') || url.startsWith('https') || url.startsWith('blob:')) {
+        const lastSlash = url.lastIndexOf('/');
+        return {
+            root: url.substring(0, lastSlash + 1),
+            file: url.substring(lastSlash + 1)
+        };
+    }
+    return { root: '/glb/', file: url };
+}
+
+/**
+ * Ensures a model is loaded into the cache as a template.
+ */
+async function ensureModelCached(filename: string): Promise<AbstractMesh> {
+    if (modelCache.has(filename)) return modelCache.get(filename)!;
+    
+    if (modelLoadingPromises.has(filename)) {
+        return modelLoadingPromises.get(filename)!;
+    }
+
+    const promise = (async () => {
+        try {
+            const { root: rootUrl, file } = getUrlParts(filename);
+            const result = await SceneLoader.ImportMeshAsync('', rootUrl, file, currentScene);
+            const template = result.meshes[0] as AbstractMesh;
+            template.name = `template_${filename}`;
+            template.setEnabled(false);
+            template.metadata = { glbFile: filename };
 
             let min = new Vector3(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY);
             let max = new Vector3(Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY);
 
-            const childMeshes = result.meshes.filter(m => m !== root);
+            const childMeshes = result.meshes.filter(m => m !== template);
             childMeshes.forEach(m => {
                 m.isPickable = true;
                 m.computeWorldMatrix(true);
@@ -2444,76 +2479,96 @@ function loadModel(filename: string, position: Vector3, normal: Vector3 | null, 
             if (childMeshes.length > 0) {
                 const center = min.add(max).scale(0.5);
                 const bottomCenterWorld = new Vector3(center.x, min.y, center.z);
-                const offset = bottomCenterWorld.subtract(root.position);
+                const offset = bottomCenterWorld.subtract(template.position);
 
                 childMeshes.forEach(m => {
                     m.setParent(null);
                     m.position.subtractInPlace(offset);
-                    m.setParent(root);
+                    m.setParent(template);
                 });
             }
+            modelCache.set(filename, template);
+            return template;
+        } catch (err) {
+            console.error('Failed to load model template', err);
+            modelLoadingPromises.delete(filename);
+            throw err;
+        }
+    })();
 
-            root.position.copyFrom(position);
-
-            // Store mount type from model definition
-            const modelDef = availableModels.find(m => m.file === filename);
-            if (modelDef) {
-                root.metadata.mountType = modelDef.type;
-            }
-
-            // Clear rotationQuaternion so rotation.xyz works (GLB imports set quaternion by default)
-            root.rotationQuaternion = null;
-
-            if (state) {
-                if (state.rotation) root.rotation.set(state.rotation.x, state.rotation.y, state.rotation.z);
-                if (state.scaling) root.scaling.set(state.scaling.x, state.scaling.y, state.scaling.z);
-                if (state.color) {
-                    const color = Color3.FromHexString(state.color);
-                    childMeshes.forEach(m => {
-                        if (m.material) {
-                            m.material = m.material.clone(m.material.name + '_colored') as Material;
-                            if (m.material instanceof PBRMaterial) {
-                                m.material.albedoColor = color;
-                            } else if (m.material instanceof StandardMaterial) {
-                                m.material.diffuseColor = color;
-                            }
-                        }
-                    });
-                }
-            }
-
-
-
-            if (normal && (Math.abs(normal.x) > 0.1 || Math.abs(normal.z) > 0.1)) {
-                const target = root.position.add(normal);
-                root.lookAt(target);
-                root.rotation.y -= Math.PI / 2; // Offset for cabinets (+X front)
-            }
-
-            // Wall-mounted items: snap to nearest wall and elevate (skip when restoring state)
-            if (root.metadata?.mountType === 'wall' && !state) {
-                snapToNearestWall(root, false);
-            }
-
-            updateObjectCollider(root);
-            // Skip boundary enforcement when restoring state - saved position is already valid
-            // This prevents wall-mounted objects from being pushed behind walls by collision resolution
-            if (!state) {
-                applyRoomBoundaries(root);
-            }
-            updateObjectCollider(root);
-
-            if (!isApplyingState) {
-                (window as any).selectMeshFromOutside?.(root);
-                saveToHistory();
-            }
-
-            return root;
-        })
-        .catch(err => {
-            console.error('Failed to load model', err);
-        });
+    modelLoadingPromises.set(filename, promise);
+    return promise;
 }
+
+async function loadModel(filename: string, position: Vector3, normal: Vector3 | null, state?: ObjectState) {
+    try {
+        const template = await ensureModelCached(filename);
+        
+        const root = template.instantiateHierarchy(null, {
+            doNotCloneChildren: false
+        }) as AbstractMesh;
+        
+        root.name = filename + '_' + Date.now();
+        root.setEnabled(true);
+        root.metadata = { ...template.metadata };
+
+        root.position.copyFrom(position);
+
+        const modelDef = availableModels.find(m => m.file === filename);
+        if (modelDef) {
+            root.metadata.mountType = modelDef.type;
+        }
+
+        root.rotationQuaternion = null;
+
+        const childMeshes = root.getChildMeshes();
+
+        if (state) {
+            if (state.rotation) root.rotation.set(state.rotation.x, state.rotation.y, state.rotation.z);
+            if (state.scaling) root.scaling.set(state.scaling.x, state.scaling.y, state.scaling.z);
+            if (state.color) {
+                const color = Color3.FromHexString(state.color);
+                childMeshes.forEach(m => {
+                    if (m.material) {
+                        m.material = m.material.clone(m.material.name + '_colored') as Material;
+                        if (m.material instanceof PBRMaterial) {
+                            m.material.albedoColor = color;
+                        } else if (m.material instanceof StandardMaterial) {
+                            m.material.diffuseColor = color;
+                        }
+                    }
+                });
+            }
+        }
+
+        if (normal && (Math.abs(normal.x) > 0.1 || Math.abs(normal.z) > 0.1)) {
+            const target = root.position.add(normal);
+            root.lookAt(target);
+            root.rotation.y -= Math.PI / 2;
+        }
+
+        if (root.metadata?.mountType === 'wall' && !state) {
+            snapToNearestWall(root, false);
+        }
+
+        updateObjectCollider(root);
+        if (!state) {
+            applyRoomBoundaries(root);
+        }
+        updateObjectCollider(root);
+
+        if (!isApplyingState) {
+            (window as any).selectMeshFromOutside?.(root);
+            saveToHistory();
+        }
+
+        return root;
+    } catch (err) {
+        console.error('Failed to instantiate model', err);
+        return null;
+    }
+}
+
 
 currentScene = createScene();
 setupUI();
