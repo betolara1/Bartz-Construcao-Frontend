@@ -60,10 +60,12 @@ let isApplyingState = false;
 
 function getCurrentSceneState(): SceneState {
     const objects: ObjectState[] = [];
+    const processedRoots = new Set<AbstractMesh>();
     currentScene.meshes.forEach(m => {
         if (!isInfrastructure(m) && m.name !== '__root__' && !m.name.includes('collider')) {
             const root = getTopLevelMesh(m);
-            if (root && root.metadata?.glbFile && !objects.some(o => o.name === root.name)) {
+            if (root && root.metadata?.glbFile && !processedRoots.has(root)) {
+                processedRoots.add(root);
                 let color = '#ffffff';
                 const firstMesh = root.getChildMeshes().find(cm => cm.material) || root;
                 if (firstMesh.material) {
@@ -102,14 +104,33 @@ function getCurrentSceneState(): SceneState {
 async function applySceneState(state: SceneState) {
     isApplyingState = true;
 
-    // Clear current scene objects
-    const toReset = currentScene.meshes.filter(m => !isInfrastructure(m) && m.name !== '__root__' && !m.name.includes('collider'));
-    toReset.forEach(m => {
-        const root = getTopLevelMesh(m);
-        if (root && root.metadata?.glbFile) {
-            disposeObjectCollider(root);
-            root.dispose();
+    // Clear selection state and dimension markers before rebuilding
+    selectedMesh = null;
+    gizmoManager.attachToMesh(null);
+    clearDimensionMarkers();
+    // Clear outline visuals on all meshes
+    currentScene.meshes.forEach(m => {
+        if (m instanceof Mesh) {
+            m.renderOutline = false;
+            m.disableEdgesRendering();
         }
+    });
+    const objToolsEl = document.getElementById('object-tools');
+    if (objToolsEl) objToolsEl.style.display = 'none';
+
+    // Clear current scene objects - collect unique roots first to avoid iterator issues
+    const rootsToDispose = new Set<AbstractMesh>();
+    currentScene.meshes.forEach(m => {
+        if (!isInfrastructure(m) && m.name !== '__root__' && !m.name.includes('collider')) {
+            const root = getTopLevelMesh(m);
+            if (root && root.metadata?.glbFile) {
+                rootsToDispose.add(root);
+            }
+        }
+    });
+    rootsToDispose.forEach(root => {
+        disposeObjectCollider(root);
+        root.dispose();
     });
 
     // Clear custom walls + end caps
@@ -1982,9 +2003,6 @@ function setupGizmos(scene: Scene) {
                 rotateBtn.style.display = isWallMounted(nodeToAttach) ? 'none' : 'flex';
             }
 
-            // Default to selection mode (show movement gizmos for floor items, none for wall items)
-            const isWall = isWallMounted(nodeToAttach);
-            gizmoManager.positionGizmoEnabled = !isWall;
             gizmoManager.rotationGizmoEnabled = false;
             updateToolActiveState('move');
         } else {
@@ -2251,8 +2269,11 @@ function setupUI() {
                 e.dataTransfer.setDragImage(img, 0, 0);
 
                 // Start loading the preview model immediately
+                // Use isApplyingState to prevent saveToHistory during preview creation
                 const dummyPos = new Vector3(0, -100, 0); // Hide initially
+                isApplyingState = true;
                 loadModel(model.file, dummyPos, null).then(mesh => {
+                    isApplyingState = false;
                     if (draggingFile === model.file && mesh) {
                         dragPreviewMesh = mesh;
                         // Set preview style
@@ -2440,6 +2461,9 @@ function loadModel(filename: string, position: Vector3, normal: Vector3 | null, 
                 root.metadata.mountType = modelDef.type;
             }
 
+            // Clear rotationQuaternion so rotation.xyz works (GLB imports set quaternion by default)
+            root.rotationQuaternion = null;
+
             if (state) {
                 if (state.rotation) root.rotation.set(state.rotation.x, state.rotation.y, state.rotation.z);
                 if (state.scaling) root.scaling.set(state.scaling.x, state.scaling.y, state.scaling.z);
@@ -2466,13 +2490,17 @@ function loadModel(filename: string, position: Vector3, normal: Vector3 | null, 
                 root.rotation.y -= Math.PI / 2; // Offset for cabinets (+X front)
             }
 
-            // Wall-mounted items: snap to nearest wall and elevate
-            if (root.metadata?.mountType === 'wall') {
+            // Wall-mounted items: snap to nearest wall and elevate (skip when restoring state)
+            if (root.metadata?.mountType === 'wall' && !state) {
                 snapToNearestWall(root, false);
             }
 
             updateObjectCollider(root);
-            applyRoomBoundaries(root);
+            // Skip boundary enforcement when restoring state - saved position is already valid
+            // This prevents wall-mounted objects from being pushed behind walls by collision resolution
+            if (!state) {
+                applyRoomBoundaries(root);
+            }
             updateObjectCollider(root);
 
             if (!isApplyingState) {
