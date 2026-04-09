@@ -495,10 +495,11 @@ function disposeObjectCollider(root: AbstractMesh) {
     }
 }
 
-function getMTV(min: Vector3, max: Vector3, wall: AbstractMesh): Vector3 | null {
+function getMTV(min: Vector3, max: Vector3, wall: AbstractMesh, constrainedNormal?: Vector3): Vector3 | null {
     // Broad phase AABB check FIRST
     const wallBBox = wall.getBoundingInfo().boundingBox;
     if (min.x > wallBBox.maximumWorld.x || max.x < wallBBox.minimumWorld.x ||
+        min.y > wallBBox.maximumWorld.y - 0.01 || max.y < wallBBox.minimumWorld.y + 0.01 || // Y-AXIS CHECK
         min.z > wallBBox.maximumWorld.z || max.z < wallBBox.minimumWorld.z) {
         return null;
     }
@@ -550,6 +551,11 @@ function getMTV(min: Vector3, max: Vector3, wall: AbstractMesh): Vector3 | null 
             return null; // Separating axis found
         }
 
+        // Prevent pushing along the wall normal to avoid snap override
+        if (constrainedNormal && Math.abs(Vector3.Dot(axis, constrainedNormal)) > 0.85) {
+            continue;
+        }
+
         if (overlap < minOverlap) {
             minOverlap = overlap;
             mtv = axis.clone();
@@ -560,11 +566,13 @@ function getMTV(min: Vector3, max: Vector3, wall: AbstractMesh): Vector3 | null 
         }
     }
 
+    if (mtv.lengthSquared() === 0) return null;
+
     return mtv.scale(minOverlap + 0.001);
 }
 
 // Returns the correction delta that was applied (zero vector if no correction)
-function resolveCollisions(root: AbstractMesh, includeWalls: boolean): Vector3 {
+function resolveCollisions(root: AbstractMesh, includeWalls: boolean, constrainedNormal?: Vector3): Vector3 {
     const totalCorrection = new Vector3(0, 0, 0);
     let { min, max } = computeMeshWorldBounds(root);
 
@@ -584,7 +592,7 @@ function resolveCollisions(root: AbstractMesh, includeWalls: boolean): Vector3 {
         for (const other of colliders) {
             if (other === root || getTopLevelMesh(other) === root) continue;
 
-            const mtv = getMTV(min, max, other);
+            const mtv = getMTV(min, max, other, constrainedNormal);
             if (mtv) {
                 root.position.addInPlace(mtv);
                 totalCorrection.addInPlace(mtv);
@@ -749,7 +757,8 @@ function snapToNearestWall(root: AbstractMesh, useDefaultHeight: boolean = false
     }
 
     // Resolve collisions against walls and other objects
-    resolveCollisions(root, true);
+    const wallNormal = new Vector3(bestNormalX, 0, bestNormalZ);
+    resolveCollisions(root, true, wallNormal);
 
     // Re-snap to ensure collision resolution didn't push us away from the wall surface
     // by projecting the current position onto the wall plane
