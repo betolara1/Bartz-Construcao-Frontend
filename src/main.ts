@@ -62,9 +62,9 @@ function getCurrentSceneState(): SceneState {
     const objects: ObjectState[] = [];
     const processedRoots = new Set<AbstractMesh>();
     currentScene.meshes.forEach(m => {
-        if (!isInfrastructure(m) && m.name !== '__root__' && !m.name.includes('collider')) {
+        if (!isInfrastructure(m) && m.name !== '__root__' && !m.name.includes('collider') && !m.name.startsWith('template_')) {
             const root = getTopLevelMesh(m);
-            if (root && root.metadata?.glbFile && !processedRoots.has(root)) {
+            if (root && root.metadata?.glbFile && !root.name.startsWith('template_') && !processedRoots.has(root)) {
                 processedRoots.add(root);
                 let color = '#ffffff';
                 const firstMesh = root.getChildMeshes().find(cm => cm.material) || root;
@@ -121,9 +121,9 @@ async function applySceneState(state: SceneState) {
     // Clear current scene objects - collect unique roots first to avoid iterator issues
     const rootsToDispose = new Set<AbstractMesh>();
     currentScene.meshes.forEach(m => {
-        if (!isInfrastructure(m) && m.name !== '__root__' && !m.name.includes('collider')) {
+        if (!isInfrastructure(m) && m.name !== '__root__' && !m.name.includes('collider') && !m.name.startsWith('template_')) {
             const root = getTopLevelMesh(m);
-            if (root && root.metadata?.glbFile) {
+            if (root && root.metadata?.glbFile && !root.name.startsWith('template_')) {
                 rootsToDispose.add(root);
             }
         }
@@ -184,6 +184,7 @@ function saveToHistory() {
 }
 
 function undo() {
+    if (isApplyingState) return;
     if (undoStack.length > 1) {
         redoStack.push(undoStack.pop()!);
         const previous = undoStack[undoStack.length - 1];
@@ -192,6 +193,7 @@ function undo() {
 }
 
 function redo() {
+    if (isApplyingState) return;
     if (redoStack.length > 0) {
         const next = redoStack.pop()!;
         undoStack.push(next);
@@ -2449,7 +2451,8 @@ function getUrlParts(url: string) {
  * Ensures a model is loaded into the cache as a template.
  */
 async function ensureModelCached(filename: string): Promise<AbstractMesh> {
-    if (modelCache.has(filename)) return modelCache.get(filename)!;
+    const cached = modelCache.get(filename);
+    if (cached && !cached.isDisposed()) return cached;
     
     if (modelLoadingPromises.has(filename)) {
         return modelLoadingPromises.get(filename)!;
