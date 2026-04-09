@@ -672,7 +672,54 @@ function snapToNearestWall(root: AbstractMesh, useDefaultHeight: boolean = false
     const objDepthHalf = Math.min(sizeX, sizeZ) / 2;
 
     // Preserve current Y unless it's initial placement
-    const currentY = useDefaultHeight ? WALL_MOUNT_HEIGHT : root.position.y;
+    let currentY = useDefaultHeight ? WALL_MOUNT_HEIGHT : root.position.y;
+
+    // --- VERTICAL Y SNAPPING LOGIC ---
+    if (!useDefaultHeight) {
+        let bestY = currentY;
+        let bestYDist = 0.15; // 15cm snap radius for a tactile "lock"
+
+        const rootMinY = min.y;
+        const rootMaxY = max.y;
+        const rootCenterY = (min.y + max.y) / 2;
+
+        for (const [p, c] of objectColliders.entries()) {
+            if (p === root || isInfrastructure(p)) continue;
+            
+            const dx = p.position.x - root.position.x;
+            const dz = p.position.z - root.position.z;
+            const distXZ = Math.sqrt(dx * dx + dz * dz);
+            
+            // Only search objects within a 3m radius
+            if (distXZ < 3.0) {
+                const oCenterY = c.position.y;
+                const halfH = c.scaling.y / 2;
+                const oMinY = oCenterY - halfH;
+                const oMaxY = oCenterY + halfH;
+
+                // Check alignment for Tops, Bottoms, and Centers
+                const distTops = Math.abs(rootMaxY - oMaxY);
+                if (distTops < bestYDist) {
+                    bestYDist = distTops;
+                    bestY = currentY + (oMaxY - rootMaxY);
+                }
+
+                const distBottoms = Math.abs(rootMinY - oMinY);
+                if (distBottoms < bestYDist) {
+                    bestYDist = distBottoms;
+                    bestY = currentY + (oMinY - rootMinY);
+                }
+
+                const distCenters = Math.abs(rootCenterY - oCenterY);
+                if (distCenters < bestYDist) {
+                    bestYDist = distCenters;
+                    bestY = currentY + (oCenterY - rootCenterY);
+                }
+            }
+        }
+        currentY = bestY;
+    }
+    // --- END VERTICAL Y SNAPPING LOGIC ---
 
     // Build list of all wall segments: perimeter + custom
     type WallSeg = { start: { x: number; z: number }; end: { x: number; z: number }; thickness: number; isPerimeter?: boolean };
