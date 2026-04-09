@@ -165,7 +165,7 @@ async function applySceneState(state: SceneState) {
     }
 
     // Load objects in parallel for maximum speed
-    await Promise.all(state.objects.map(obj => 
+    await Promise.all(state.objects.map(obj =>
         loadModel(obj.file, new Vector3(obj.position.x, obj.position.y, obj.position.z), null, obj)
     ));
 
@@ -449,6 +449,28 @@ function computeMeshWorldBounds(root: AbstractMesh) {
     return { min, max };
 }
 
+function getObjectBaseSize(root: AbstractMesh): Vector3 {
+    const originalScaling = root.scaling.clone();
+    const originalRotation = root.rotation.clone();
+
+    // Reset to calculate raw dimensions
+    root.scaling.set(1, 1, 1);
+    root.rotation.set(0, 0, 0);
+    root.computeWorldMatrix(true);
+    root.getChildMeshes().forEach(m => m.computeWorldMatrix(true));
+
+    const { min, max } = computeMeshWorldBounds(root);
+    const size = max.subtract(min);
+
+    // Restore
+    root.scaling.copyFrom(originalScaling);
+    root.rotation.copyFrom(originalRotation);
+    root.computeWorldMatrix(true);
+    root.getChildMeshes().forEach(m => m.computeWorldMatrix(true));
+
+    return size;
+}
+
 function createOrUpdateObjectCollider(root: AbstractMesh): Mesh {
     const { min, max } = computeMeshWorldBounds(root);
     const size = max.subtract(min);
@@ -685,11 +707,11 @@ function snapToNearestWall(root: AbstractMesh, useDefaultHeight: boolean = false
 
         for (const [p, c] of objectColliders.entries()) {
             if (p === root || isInfrastructure(p)) continue;
-            
+
             const dx = p.position.x - root.position.x;
             const dz = p.position.z - root.position.z;
             const distXZ = Math.sqrt(dx * dx + dz * dz);
-            
+
             // Only search objects within a 3m radius
             if (distXZ < 3.0) {
                 const oCenterY = c.position.y;
@@ -1954,7 +1976,37 @@ function setupGizmos(scene: Scene) {
     });
     gizmoManager.gizmos.positionGizmo?.onDragEndObservable.add(() => saveToHistory());
     gizmoManager.gizmos.rotationGizmo?.onDragEndObservable.add(() => saveToHistory());
+    gizmoManager.gizmos.scaleGizmo?.onDragObservable.add(() => {
+        if (selectedMesh) {
+            syncScaleUI(selectedMesh);
+            updateDimensionMarkers(selectedMesh);
+        }
+    });
     gizmoManager.gizmos.scaleGizmo?.onDragEndObservable.add(() => saveToHistory());
+
+    const syncScaleUI = (mesh: AbstractMesh) => {
+        const root = getTopLevelMesh(mesh);
+        if (!root || isInfrastructure(root)) return;
+
+        if (!root.metadata) root.metadata = {};
+        if (!root.metadata.baseSize) {
+            root.metadata.baseSize = getObjectBaseSize(root);
+        }
+        const baseSize = root.metadata.baseSize;
+        const currentSize = {
+            x: baseSize.x * root.scaling.x,
+            y: baseSize.y * root.scaling.y,
+            z: baseSize.z * root.scaling.z
+        };
+
+        const scaleX = document.getElementById('obj-scale-x-toolbar') as HTMLInputElement;
+        const scaleY = document.getElementById('obj-scale-y-toolbar') as HTMLInputElement;
+        const scaleZ = document.getElementById('obj-scale-z-toolbar') as HTMLInputElement;
+
+        if (scaleX) scaleX.value = currentSize.x.toFixed(3);
+        if (scaleY) scaleY.value = currentSize.y.toFixed(3);
+        if (scaleZ) scaleZ.value = currentSize.z.toFixed(3);
+    };
 
     const objectTools = document.getElementById('object-tools') as HTMLElement;
 
@@ -1992,17 +2044,13 @@ function setupGizmos(scene: Scene) {
             }
             updateObjectCollider(nodeToAttach);
             objectTools.style.display = 'flex';
-            updateDimensionMarkers(nodeToAttach);
         }
 
-        const scale = nodeToAttach.scaling;
+        syncScaleUI(nodeToAttach);
+
         const scaleX = document.getElementById('obj-scale-x-toolbar') as HTMLInputElement;
         const scaleY = document.getElementById('obj-scale-y-toolbar') as HTMLInputElement;
         const scaleZ = document.getElementById('obj-scale-z-toolbar') as HTMLInputElement;
-
-        scaleX.value = (scale.x * 100).toString();
-        scaleY.value = (scale.y * 100).toString();
-        scaleZ.value = (scale.z * 100).toString();
 
         scaleX.disabled = infrastructure;
         scaleY.disabled = infrastructure;
@@ -2317,8 +2365,8 @@ function setupUI() {
         catalogList.appendChild(item);
 
         item.addEventListener('mouseenter', () => {
-             // Smart pre-loading: start downloading when user hovers over the catalog item
-             ensureModelCached(model.file);
+            // Smart pre-loading: start downloading when user hovers over the catalog item
+            ensureModelCached(model.file);
         });
 
         item.addEventListener('dragstart', e => {
@@ -2476,13 +2524,24 @@ function setupUI() {
     });
 }
 
-function updateScale(axis: 'x' | 'y' | 'z', percent: number) {
+function updateScale(axis: 'x' | 'y' | 'z', value: number) {
     if (selectedMesh && !isInfrastructure(selectedMesh)) {
-        selectedMesh.scaling[axis] = percent / 100;
-        updateObjectCollider(selectedMesh);
-        applyRoomBoundaries(selectedMesh);
-        updateObjectCollider(selectedMesh);
+        const root = getTopLevelMesh(selectedMesh);
+        if (!root.metadata) root.metadata = {};
+        if (!root.metadata.baseSize) {
+            root.metadata.baseSize = getObjectBaseSize(root);
+        }
+
+        const baseDim = root.metadata.baseSize[axis];
+        if (baseDim > 0.001) {
+            root.scaling[axis] = value / baseDim;
+        }
+
+        updateObjectCollider(root);
+        applyRoomBoundaries(root);
+        updateObjectCollider(root);
         saveToHistory();
+        updateDimensionMarkers(root);
     }
 }
 
@@ -2509,7 +2568,7 @@ function getUrlParts(url: string) {
 async function ensureModelCached(filename: string): Promise<AbstractMesh> {
     const cached = modelCache.get(filename);
     if (cached && !cached.isDisposed()) return cached;
-    
+
     if (modelLoadingPromises.has(filename)) {
         return modelLoadingPromises.get(filename)!;
     }
@@ -2562,11 +2621,11 @@ async function ensureModelCached(filename: string): Promise<AbstractMesh> {
 async function loadModel(filename: string, position: Vector3, normal: Vector3 | null, state?: ObjectState) {
     try {
         const template = await ensureModelCached(filename);
-        
+
         const root = template.instantiateHierarchy(null, {
             doNotCloneChildren: false
         }) as AbstractMesh;
-        
+
         root.name = filename + '_' + Date.now();
         root.setEnabled(true);
         root.metadata = { ...template.metadata };

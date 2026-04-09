@@ -1,22 +1,27 @@
 <!DOCTYPE html>
 <html lang="pt-br">
+
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Bartz Moveis Planejados</title>
     <!-- Google Fonts: Open Sans like mooble usually uses, and Material Symbols for icons -->
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400;600;700&display=swap">
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+    <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
     <link rel="stylesheet" href="style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet" />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"
+        rel="stylesheet" />
 </head>
+
 <body>
     <div id="app">
         <!-- Main Top Navigation -->
         <header class="top-nav">
             <div class="nav-left">
                 <div class="logo">
-                     <span class="material-symbols-outlined" style="color: #FF8533; font-size: 32px;">home</span>
+                    <span class="material-symbols-outlined" style="color: #FF8533; font-size: 32px;">home</span>
                 </div>
             </div>
         </header>
@@ -24,13 +29,18 @@
         <!-- Secondary Toolbar -->
         <div class="toolbar">
             <div class="toolbar-tools">
-                <div class="tool-btn" id="tool-new"><span class="material-symbols-outlined">home</span><span>Novo</span></div>
-                <div class="tool-btn" id="tool-save"><span class="material-symbols-outlined">save</span><span>Salvar</span></div>
+                <div class="tool-btn" id="tool-new"><span class="material-symbols-outlined">home</span><span>Novo</span>
+                </div>
+                <div class="tool-btn" id="tool-save"><span
+                        class="material-symbols-outlined">save</span><span>Salvar</span></div>
                 <div class="tool-separator"></div>
-                <div class="tool-btn" id="tool-undo"><span class="material-symbols-outlined">undo</span><span>Desfazer</span></div>
-                <div class="tool-btn" id="tool-redo"><span class="material-symbols-outlined">redo</span><span>Refazer</span></div>
+                <div class="tool-btn" id="tool-undo"><span
+                        class="material-symbols-outlined">undo</span><span>Desfazer</span></div>
+                <div class="tool-btn" id="tool-redo"><span
+                        class="material-symbols-outlined">redo</span><span>Refazer</span></div>
                 <div class="tool-separator"></div>
-                <div class="tool-btn" id="tool-build-wall"><span class="material-symbols-outlined">add</span><span>Construir paredes</span></div>
+                <div class="tool-btn" id="tool-build-wall"><span
+                        class="material-symbols-outlined">add</span><span>Construir paredes</span></div>
 
                 <div id="wall-tools-toolbar" class="toolbar-group" style="display: none;">
                     <div id="wall-length-container" class="toolbar-input-group">
@@ -40,9 +50,12 @@
                             <input type="number" id="wall2d-length-input-toolbar" min="0.05" max="50" step="0.01">
                         </div>
                     </div>
-                    <div class="tool-btn" id="tool-delete-wall-toolbar" style="color: #ef4444;"><span class="material-symbols-outlined">delete</span><span>Excluir</span></div>
-                    <div class="tool-btn" id="tool-undo-wall-toolbar"><span class="material-symbols-outlined">undo</span><span>Desfazer</span></div>
-                    <div class="tool-btn" id="tool-exit-2d-toolbar" style="color: #10b981;"><span class="material-symbols-outlined">check_circle</span><span>Feito</span></div>
+                    <div class="tool-btn" id="tool-delete-wall-toolbar" style="color: #ef4444;"><span
+                            class="material-symbols-outlined">delete</span><span>Excluir</span></div>
+                    <div class="tool-btn" id="tool-undo-wall-toolbar"><span
+                            class="material-symbols-outlined">undo</span><span>Desfazer</span></div>
+                    <div class="tool-btn" id="tool-exit-2d-toolbar" style="color: #10b981;"><span
+                            class="material-symbols-outlined">check_circle</span><span>Feito</span></div>
                 </div>
 
                 <!-- Floor Specific Tools -->
@@ -67,34 +80,41 @@
 
                 <!-- Object Specific Tools (Contextual) -->
                 <div id="object-tools" class="toolbar-group" style="display: none;">
-                    <div class="tool-btn" id="tool-move" data-active="true"><span class="material-symbols-outlined">open_with</span><span>Mover</span></div>
-                    <div class="tool-btn" id="tool-rotate"><span class="material-symbols-outlined">sync</span><span>Girar</span></div>
-                    <div class="tool-btn" id="tool-duplicate"><span class="material-symbols-outlined">content_copy</span><span>Duplicar</span></div>
-                    <div class="tool-btn" id="tool-delete" style="color: #ef4444;"><span class="material-symbols-outlined">delete</span><span>Excluir</span></div>
-                    
+                    <div class="tool-btn" id="tool-move" data-active="true"><span
+                            class="material-symbols-outlined">open_with</span><span>Mover</span></div>
+                    <div class="tool-btn" id="tool-rotate"><span
+                            class="material-symbols-outlined">sync</span><span>Girar</span></div>
+                    <div class="tool-btn" id="tool-duplicate"><span
+                            class="material-symbols-outlined">content_copy</span><span>Duplicar</span></div>
+                    <div class="tool-btn" id="tool-delete" style="color: #ef4444;"><span
+                            class="material-symbols-outlined">delete</span><span>Excluir</span></div>
+
                     <div class="tool-separator"></div>
 
                     <div class="toolbar-input-group">
                         <span class="material-symbols-outlined">straighten</span>
                         <div class="input-label-stack">
-                            <label>LARGURA (X%)</label>
-                            <input type="number" id="obj-scale-x-toolbar" min="10" max="500" value="100">
+                            <label>LARGURA (m)</label>
+                            <input type="number" id="obj-scale-x-toolbar" min="0.01" max="100" step="0.001"
+                                value="1.00">
                         </div>
                     </div>
 
                     <div class="toolbar-input-group">
                         <span class="material-symbols-outlined">expand</span>
                         <div class="input-label-stack">
-                            <label>ALTURA (Y%)</label>
-                            <input type="number" id="obj-scale-y-toolbar" min="10" max="500" value="100">
+                            <label>ALTURA (m)</label>
+                            <input type="number" id="obj-scale-y-toolbar" min="0.01" max="100" step="0.001"
+                                value="1.00">
                         </div>
                     </div>
 
                     <div class="toolbar-input-group">
                         <span class="material-symbols-outlined">compress</span>
                         <div class="input-label-stack">
-                            <label>PROF. (Z%)</label>
-                            <input type="number" id="obj-scale-z-toolbar" min="10" max="500" value="100">
+                            <label>PROF. (m)</label>
+                            <input type="number" id="obj-scale-z-toolbar" min="0.01" max="100" step="0.001"
+                                value="1.00">
                         </div>
                     </div>
                 </div>
@@ -103,7 +123,7 @@
 
         <!-- Main Content Area (Sidebar + Canvas) -->
         <div class="main-body">
-            
+
             <!-- Leftmost Sidebar (Categories) -->
             <aside class="sidebar-categories">
                 <div class="cat-btn active">
@@ -130,12 +150,13 @@
             <!-- 3D Canvas Area -->
             <div class="canvas-container">
                 <canvas id="renderCanvas"></canvas>
-                
+
                 <!-- Floating Properties Panel -->
+            </div>
         </div>
-    </div>
-    
-    <script type="module" src="/src/main.ts"></script>
-    <link rel="stylesheet" href="/style.css">
+
+        <script type="module" src="/src/main.ts"></script>
+        <link rel="stylesheet" href="/style.css">
 </body>
+
 </html>
